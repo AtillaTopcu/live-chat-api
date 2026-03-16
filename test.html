@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>LiveChat Test</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/7.0.0/signalr.min.js"></script>
+</head>
+<body>
+    <div id="loginDiv">
+        <h2>Giriş Yap</h2>
+        <input id="emailInput" type="text" placeholder="Email" />
+        <input id="passwordInput" type="password" placeholder="Şifre" />
+        <button onclick="login()", id="loginButton">Giriş</button>
+    </div>
+
+    <div id="roomDiv" style="display:none">
+        <h2>Odalar</h2>
+        
+        <h3>Yeni Oda Oluştur</h3>
+        <input id="roomNameInput" type="text" placeholder="Oda adı..." />
+        <button onclick="createRoom()" id="createRoomButton">Oluştur</button>
+
+        <h3>Mevcut Odalar</h3>
+        <ul id="roomList"></ul>
+    </div>
+
+    <div id="chatDiv" style="display:none">
+        <h2>LiveChat — Oda <span id="roomLabel"></span></h2>
+        <input id="messageInput" type="text" placeholder="Mesaj yaz..." />
+        <button onclick="sendMessage()">Gönder</button>
+        <ul id="messages"></ul>
+    </div>
+
+    <script>
+        let connection;
+        let token;
+        let currentRoom;
+
+        async function login() {
+            document.getElementById("loginButton").disabled = true;
+            const email = document.getElementById("emailInput").value;
+            const password = document.getElementById("passwordInput").value;
+
+            const response = await fetch("http://localhost:5263/api/auth/login", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ email, password })
+            });
+
+            token = await response.text();
+
+            connection = new signalR.HubConnectionBuilder()
+                .withUrl("http://localhost:5263/chat?access_token=" + token)
+                .build();
+
+            connection.on("receivedMessage", (username, message) => {
+                const li = document.createElement("li");
+                li.textContent = username + ": " + message;
+                document.getElementById("messages").appendChild(li);
+            });
+
+            await connection.start();
+            await loadRooms();
+            document.getElementById("loginDiv").style.display = "none";
+            document.getElementById("roomDiv").style.display = "block";
+        }
+
+        async function joinRoom(roomID) {
+            currentRoom = roomID;
+
+            await connection.invoke("JoinRoom", currentRoom);
+
+            const messagesResponse = await fetch("http://localhost:5263/api/message?roomID=" + currentRoom, {
+                headers: { "Authorization": "Bearer " + token }
+            });
+            const oldMessages = await messagesResponse.json();
+            
+            document.getElementById("messages").innerHTML = "";
+            oldMessages.forEach(m => {
+                const li = document.createElement("li");
+                li.textContent = m.username + ": " + m.content;
+                document.getElementById("messages").appendChild(li);
+            });
+
+            document.getElementById("roomLabel").textContent = currentRoom;
+            document.getElementById("roomDiv").style.display = "none";
+            document.getElementById("chatDiv").style.display = "block";
+        }
+
+        function sendMessage() {
+            const content = document.getElementById("messageInput").value;
+            connection.invoke("SendMessage", { content: content }, currentRoom);
+        }
+
+            async function loadRooms() {
+                const response = await fetch("http://localhost:5263/api/room", {
+                headers: { "Authorization": "Bearer " + token }
+                });
+                const rooms = await response.json();
+                
+                document.getElementById("roomList").innerHTML = "";
+                rooms.forEach(r => {
+                    const li = document.createElement("li");
+                    li.textContent = r.roomName;
+                    li.onclick = () => joinRoom(r.id);
+                    li.style.cursor = "pointer";
+                    document.getElementById("roomList").appendChild(li);
+                });
+            }
+
+            async function createRoom() {
+                document.getElementById("createRoomButton").disabled = true;
+                const roomName = document.getElementById("roomNameInput").value;
+        
+                await fetch("http://localhost:5263/api/room", {
+                    method: "POST",
+                    headers: { 
+                        "Content-Type": "application/json",
+                        "Authorization": "Bearer " + token 
+                    },
+                    body: JSON.stringify({ roomName: roomName })
+                });
+
+                document.getElementById("createRoomButton").disabled = false;
+                await loadRooms();
+            }
+    </script>
+</body>
+</html>
